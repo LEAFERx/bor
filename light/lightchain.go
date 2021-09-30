@@ -226,6 +226,10 @@ func (lc *LightChain) StateCache() state.Database {
 	panic("not implemented")
 }
 
+func (lc *LightChain) StateAt(hash common.Hash) (*state.StateDB, error) {
+	panic("not implemented")
+}
+
 // GetBody retrieves a block body (transactions and uncles) from the database
 // or ODR service by hash, caching it if found.
 func (lc *LightChain) GetBody(ctx context.Context, hash common.Hash) (*types.Body, error) {
