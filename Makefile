@@ -17,12 +17,18 @@ bor:
 	$(GORUN) build/ci.go install ./cmd/geth
 	mkdir -p $(GOPATH)/bin/
 	cp $(GOBIN)/geth $(GOBIN)/bor
-	cp $(GOBIN)/* $(GOPATH)/bin/
+	# cp $(GOBIN)/* $(GOPATH)/bin/
 
 bor-all:
 	$(GORUN) build/ci.go install
 	mkdir -p $(GOPATH)/bin/
 	cp $(GOBIN)/geth $(GOBIN)/bor
+	# cp $(GOBIN)/* $(GOPATH)/bin/
+
+install: bor
+	cp $(GOBIN)/* $(GOPATH)/bin/
+
+install-all: bor-all
 	cp $(GOBIN)/* $(GOPATH)/bin/
 
 geth:
