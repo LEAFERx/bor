@@ -58,8 +58,8 @@ func testCtx() *vmContext {
 	return &vmContext{blockCtx: vm.BlockContext{BlockNumber: big.NewInt(1)}, txCtx: vm.TxContext{GasPrice: big.NewInt(100000)}}
 }
 
-func runTrace(tracer *Tracer, vmctx *vmContext, chaincfg *params.ChainConfig) (json.RawMessage, error) {
-	env := vm.NewEVM(vmctx.blockCtx, vmctx.txCtx, &dummyStatedb{}, chaincfg, vm.Config{Debug: true, Tracer: tracer})
+func runTrace(tracer *Tracer, vmctx *vmContext) (json.RawMessage, error) {
+	env := vm.NewEVM(vmctx.blockCtx, vmctx.txCtx, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
 	var (
 		startGas uint64 = 10000
 		value           = big.NewInt(0)
@@ -79,14 +79,12 @@ func runTrace(tracer *Tracer, vmctx *vmContext, chaincfg *params.ChainConfig) (j
 func TestTracer(t *testing.T) {
 	execTracer := func(code string) ([]byte, string) {
 		t.Helper()
-		tracer, err := New(code, new(Context))
+		ctx := &vmContext{blockCtx: vm.BlockContext{BlockNumber: big.NewInt(1)}, txCtx: vm.TxContext{GasPrice: big.NewInt(100000)}}
+		tracer, err := New(code, ctx.txCtx)
 		if err != nil {
 			t.Fatal(err)
 		}
-		ret, err := runTrace(tracer, &vmContext{
-			blockCtx: vm.BlockContext{BlockNumber: big.NewInt(1)},
-			txCtx:    vm.TxContext{GasPrice: big.NewInt(100000)},
-		}, params.TestChainConfig)
+		ret, err := runTrace(tracer, ctx)
 		if err != nil {
 			return nil, err.Error() // Stringify to allow comparison without nil checks
 		}
@@ -133,7 +131,8 @@ func TestHalt(t *testing.T) {
 	t.Skip("duktape doesn't support abortion")
 
 	timeout := errors.New("stahp")
-	tracer, err := New("{step: function() { while(1); }, result: function() { return null; }}", new(Context))
+	vmctx := testCtx()
+	tracer, err := New("{step: function() { while(1); }, result: function() { return null; }}", vmctx.txCtx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,13 +140,14 @@ func TestHalt(t *testing.T) {
 		time.Sleep(1 * time.Second)
 		tracer.Stop(timeout)
 	}()
-	if _, err = runTrace(tracer, testCtx(), params.TestChainConfig); err.Error() != "stahp    in server-side tracer function 'step'" {
+	if _, err = runTrace(tracer, vmctx); err.Error() != "stahp    in server-side tracer function 'step'" {
 		t.Errorf("Expected timeout error, got %v", err)
 	}
 }
 
 func TestHaltBetweenSteps(t *testing.T) {
-	tracer, err := New("{step: function() {}, fault: function() {}, result: function() { return null; }}", new(Context))
+	vmctx := testCtx()
+	tracer, err := New("{step: function() {}, fault: function() {}, result: function() { return null; }}", vmctx.txCtx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,14 +178,12 @@ func TestNoStepExec(t *testing.T) {
 	}
 	execTracer := func(code string) []byte {
 		t.Helper()
-		tracer, err := New(code, new(Context))
+		ctx := &vmContext{blockCtx: vm.BlockContext{BlockNumber: big.NewInt(1)}, txCtx: vm.TxContext{GasPrice: big.NewInt(100000)}}
+		tracer, err := New(code, ctx.txCtx)
 		if err != nil {
 			t.Fatal(err)
 		}
-		ret, err := runEmptyTrace(tracer, &vmContext{
-			blockCtx: vm.BlockContext{BlockNumber: big.NewInt(1)},
-			txCtx:    vm.TxContext{GasPrice: big.NewInt(100000)},
-		})
+		ret, err := runEmptyTrace(tracer, ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -203,36 +201,5 @@ func TestNoStepExec(t *testing.T) {
 		if have := execTracer(tt.code); tt.want != string(have) {
 			t.Errorf("testcase %d: expected return value to be %s got %s\n\tcode: %v", i, tt.want, string(have), tt.code)
 		}
-	}
-}
-
-func TestIsPrecompile(t *testing.T) {
-	chaincfg := &params.ChainConfig{ChainID: big.NewInt(1), HomesteadBlock: big.NewInt(0), DAOForkBlock: nil, DAOForkSupport: false, EIP150Block: big.NewInt(0), EIP150Hash: common.Hash{}, EIP155Block: big.NewInt(0), EIP158Block: big.NewInt(0), ByzantiumBlock: big.NewInt(100), ConstantinopleBlock: big.NewInt(0), PetersburgBlock: big.NewInt(0), IstanbulBlock: big.NewInt(200), MuirGlacierBlock: big.NewInt(0), BerlinBlock: big.NewInt(300), LondonBlock: big.NewInt(0), CatalystBlock: nil, Ethash: new(params.EthashConfig), Clique: nil}
-	chaincfg.ByzantiumBlock = big.NewInt(100)
-	chaincfg.IstanbulBlock = big.NewInt(200)
-	chaincfg.BerlinBlock = big.NewInt(300)
-	txCtx := vm.TxContext{GasPrice: big.NewInt(100000)}
-	tracer, err := New("{addr: toAddress('0000000000000000000000000000000000000009'), res: null, step: function() { this.res = isPrecompiled(this.addr); }, fault: function() {}, result: function() { return this.res; }}", new(Context))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	blockCtx := vm.BlockContext{BlockNumber: big.NewInt(150)}
-	res, err := runTrace(tracer, &vmContext{blockCtx, txCtx}, chaincfg)
-	if err != nil {
-		t.Error(err)
-	}
-	if string(res) != "false" {
-		t.Errorf("Tracer should not consider blake2f as precompile in byzantium")
-	}
-
-	tracer, _ = New("{addr: toAddress('0000000000000000000000000000000000000009'), res: null, step: function() { this.res = isPrecompiled(this.addr); }, fault: function() {}, result: function() { return this.res; }}", new(Context))
-	blockCtx = vm.BlockContext{BlockNumber: big.NewInt(250)}
-	res, err = runTrace(tracer, &vmContext{blockCtx, txCtx}, chaincfg)
-	if err != nil {
-		t.Error(err)
-	}
-	if string(res) != "true" {
-		t.Errorf("Tracer should consider blake2f as precompile in istanbul")
 	}
 }
