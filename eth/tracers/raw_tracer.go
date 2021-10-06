@@ -170,7 +170,6 @@ func (rt *RawTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cos
 	switch op {
 	// If a new contract is being created, add to the call stack
 	case vm.CREATE, vm.CREATE2:
-		// FIXME: originally uses "peek(number)". Not sure if it corresponds to "Back"
 		inOff := int64(scope.Stack.Back(1).Uint64())
 		inEnd := inOff + int64(scope.Stack.Back(2).Uint64())
 		call := CallFrame{
@@ -262,11 +261,17 @@ func (rt *RawTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cos
 			// delete call.gasIn; delete call.gasCost;
 			call.gasIn = 0
 			call.gasCost = 0
+			// FIXME: js tracer does not check this bound
 			if len(scope.Stack.Data()) > 0 {
 				ret := scope.Stack.Back(0).ToBig()
-				addr := common.BigToAddress(ret)
-				call.to = addr
-				call.output = env.StateDB.GetCode(addr)
+				// if ret != 0, faster comparison for big.Int
+				if len(ret.Bits()) != 0 {
+					addr := common.BigToAddress(ret)
+					call.to = addr
+					call.output = env.StateDB.GetCode(addr)
+				} else if call.err == "" {
+					call.err = "internal failure" // TODO(karalabe): surface these faults somehow
+				}
 			} else if call.err == "" {
 				call.err = "internal failure" // TODO(karalabe): surface these faults somehow
 			}
@@ -275,8 +280,15 @@ func (rt *RawTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cos
 			if call.gas > 0 {
 				call.gasUsed = call.gasIn - call.gasCost + call.gas - uint64(*rt.gasValue)
 			}
+			// FIXME: js tracer does not check this bound
 			if len(scope.Stack.Data()) > 0 {
-				call.output = scope.Memory.GetCopy(call.outOff, call.outLen)
+				ret := scope.Stack.Back(0).ToBig()
+				// if ret != 0, faster comparison for big.Int
+				if len(ret.Bits()) != 0 {
+					call.output = scope.Memory.GetCopy(call.outOff, call.outLen)
+				} else if call.err == "" {
+					call.err = "internal failure" // TODO(karalabe): surface these faults somehow
+				}
 			} else if call.err == "" {
 				call.err = "internal failure" // TODO(karalabe): surface these faults somehow
 			}
